@@ -157,7 +157,6 @@ const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys 
 
 
 		const logRestul = await request.post('', payload)
-		console.log(logRestul)
 		nextSequenceToken = logRestul.data.nextSequenceToken
 	} catch (error) {
 		console.error(error)
