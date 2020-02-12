@@ -145,7 +145,12 @@ const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys 
 			payload.sequenceToken = nextSequenceToken;
 		} else {
 			const describeRes = await getstokenreq.post('', describePayload)
-			payload.sequenceToken = describeRes.data.logStreams[0].uploadSequenceToken
+			if (!describeRes.data.logStreams || describeRes.data.logStreams.length === 0) {
+				payload.sequenceToken = ''
+			} else {
+
+				payload.sequenceToken = describeRes.data.logStreams[0].uploadSequenceToken
+			}
 		}
 
 
