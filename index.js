@@ -7,19 +7,19 @@
 */
 
 const axios = require('axios');
-const aws4  = require('./aws4-browser/aws4-crypto-js');
+const aws4 = require('./aws4-browser/aws4-crypto-js');
 
-const getRequestParams = (method, region, payload, keys={}) => {
+const getRequestParams = (method, region, payload, keys = {}) => {
 	if (!region)
 		throw new Error('Missing required argument: \'region\' is required.')
 	if (!method)
 		throw new Error('Missing required argument: \'method\' is required.')
 
 	let opts = {
-		service: 'logs', 
-		region: region, 
-		path: `/?Action=${method}`, 
-		headers: { 
+		service: 'logs',
+		region: region,
+		path: `/?Action=${method}`,
+		headers: {
 			'X-Amz-Target': `Logs_20140328.${method}`,
 			'Accept': 'application/json',
 			'Content-Type': 'application/x-amz-json-1.1'
@@ -92,69 +92,83 @@ const _sequenceTokens = new Map()
  * @param  {Number} 				retryCount    	[description]
  * @return {Promise}               					[description]
  */
-const addLogsToStream = (entry, logGroupName, logStreamName, region, keys={}, sequenceToken='', retryCount=0) => {
-	if (!logGroupName)
-		throw new Error('Missing required argument: \'logGroupName\' is required.')
-	if (!logStreamName)
-		throw new Error('Missing required argument: \'logStreamName\' is required.')
-	if (!entry)
-		throw new Error('Missing required argument: \'entry\' is required.')
-	
-	const entryType = typeof(entry)
-	const now = Date.now()
+const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys = {}, sequenceToken = '', retryCount = 0) => {
+	try {
+		if (!logGroupName)
+			throw new Error('Missing required argument: \'logGroupName\' is required.')
+		if (!logStreamName)
+			throw new Error('Missing required argument: \'logStreamName\' is required.')
+		if (!entry)
+			throw new Error('Missing required argument: \'entry\' is required.')
 
-	const events = 
-		// entry is a message
-		entryType == 'string' ? [{ message: entry, timestamp: now }] :
-		// entry is a well-formatted log event
-			entryType == 'object' && entry.timestamp ? [{ message: entry.message, timestamp: entry.timestamp }] :
-				// entry is an array of items
-				entry.length > 0 ? entry.map(e => 
-					typeof(e) == 'string' ? { message: e, timestamp: now } :
-						e.timestamp ? { message: e.message, timestamp: e.timestamp } : null).filter(x => x)
-					: null
+		const entryType = typeof (entry)
+		const now = Date.now()
 
-	const nothingToLog = events == null
+		const events =
+			// entry is a message
+			entryType == 'string' ? [{ message: entry, timestamp: now }] :
+				// entry is a well-formatted log event
+				entryType == 'object' && entry.timestamp ? [{ message: entry.message, timestamp: entry.timestamp }] :
+					// entry is an array of items
+					entry.length > 0 ? entry.map(e =>
+						typeof (e) == 'string' ? { message: e, timestamp: now } :
+							e.timestamp ? { message: e.message, timestamp: e.timestamp } : null).filter(x => x)
+						: null
 
-	const service = 'PutLogEvents'
-	let payload = {
-		logEvents: events,
-		logGroupName: logGroupName,
-		logStreamName: logStreamName
+
+		const service = 'PutLogEvents'
+		const describeService = 'DescribeLogStreams'
+		let payload = {
+			logEvents: events,
+			logGroupName: logGroupName,
+			logStreamName: logStreamName
+		}
+
+		let describePayload = {
+			limit: 2,
+			descending: true,
+			logGroupName: logGroupName,
+			logStreamName: logStreamName
+		}
+
+		const tokenKey = logGroupName + '__' + logStreamName
+		sequenceToken = sequenceToken || _sequenceTokens.get(tokenKey)
+		if (sequenceToken)
+			payload.sequenceToken = sequenceToken
+
+
+		const { uri: describeUri, headers: describeHeaders } = getRequestParams(describeService, region, describePayload, keys)
+
+
+
+		const getstokenreq = axios.create({
+			baseURL: describeUri,
+			headers: describeHeaders
+		});
+
+		const describeRes = await getstokenreq.post('', describePayload)
+		console.log(describeRes)
+		console.log(describeRes.data.logStreams[0].uploadSequenceToken)
+
+		payload.sequenceToken = describeRes.data.logStreams[0].uploadSequenceToken
+
+		const { uri, headers } = getRequestParams(service, region, payload, keys)
+		const request = axios.create({
+			baseURL: uri,
+			headers: headers
+		})
+
+
+		const logRestul = await request.post('', payload)
+		console.log(logRestul)
+	} catch (error) {
+		console.error(error)
 	}
 
-	const tokenKey = logGroupName + '__' + logStreamName
-	sequenceToken = sequenceToken || _sequenceTokens.get(tokenKey)
-	if (sequenceToken)
-		payload.sequenceToken = sequenceToken
 
-	const { uri, headers } = getRequestParams(service, region, payload, keys)
-
-	const request = axios.create({
-		baseURL: uri,
-		headers: headers
-	})
-
-	return retryCount > 3 || nothingToLog ? Promise.resolve(null) : request.post('', payload)
-		.then(results => {
-			//console.log('Yes')
-			const token = results.data.nextSequenceToken
-			_sequenceTokens.set(tokenKey, token)
-		})
-		.catch(err => {
-			//console.log('Oops')
-			const token = err.response.data.expectedSequenceToken
-			if (token) {
-				_sequenceTokens.set(tokenKey, token)
-				retryCount += 1
-				return addLogsToStream(entry, logGroupName, logStreamName, region, keys, token, retryCount)
-			}
-			else 
-				console.error(err.response.data)
-		})
 }
 
-const delayFn = (fn,time) => makeQuerablePromise((new Promise((onSuccess) => setTimeout(() => onSuccess(), time))).then(() => fn()))
+const delayFn = (fn, time) => makeQuerablePromise((new Promise((onSuccess) => setTimeout(() => onSuccess(), time))).then(() => fn()))
 const makeQuerablePromise = promise => {
 	// Don't modify any promise that has been already modified.
 	if (promise.isResolved) return promise
@@ -170,7 +184,7 @@ const makeQuerablePromise = promise => {
 			isFulfilled = true
 			isPending = false
 			return v
-		}, 
+		},
 		e => {
 			isRejected = true
 			isPending = false
@@ -183,6 +197,8 @@ const makeQuerablePromise = promise => {
 	result.isRejected = () => isRejected
 	return result
 }
+
+
 
 const _logbuffer = new WeakMap()
 const Logger = class {
@@ -223,7 +239,7 @@ const Logger = class {
 						const { latest, data, job } = (_logbuffer.get(this) || { latest: now, data: [], job: null })
 						// console.log('Finally logging now...')
 						// console.log(data)
-						_logbuffer.set(this, { latest, data:[], job })
+						_logbuffer.set(this, { latest, data: [], job })
 						addLogsToStream(data, logGroupName, logStreamName, region, keys)
 					}, uploadFreq))
 				}
