@@ -76,7 +76,7 @@ const createLogStream = (logStreamName, { logGroupName, region, accessKeyId, sec
 		})
 }
 
-const _sequenceTokens = new Map()
+let nextSequenceToken = ''
 /**
  * Adds logs to a AWS CloudWatch log stream
  * @param  {String|Object|Array} 	entry         	If type is Object it must be structured as follow: { message: ..., timestamp: ... }
@@ -131,11 +131,6 @@ const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys 
 			logStreamName: logStreamName
 		}
 
-		const tokenKey = logGroupName + '__' + logStreamName
-		sequenceToken = sequenceToken || _sequenceTokens.get(tokenKey)
-		if (sequenceToken)
-			payload.sequenceToken = sequenceToken
-
 
 		const { uri: describeUri, headers: describeHeaders } = getRequestParams(describeService, region, describePayload, keys)
 
@@ -146,11 +141,13 @@ const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys 
 			headers: describeHeaders
 		});
 
-		const describeRes = await getstokenreq.post('', describePayload)
-		console.log(describeRes)
-		console.log(describeRes.data.logStreams[0].uploadSequenceToken)
+		if (nextSequenceToken) {
+			payload.sequenceToken = nextSequenceToken;
+		} else {
+			const describeRes = await getstokenreq.post('', describePayload)
+			payload.sequenceToken = describeRes.data.logStreams[0].uploadSequenceToken
+		}
 
-		payload.sequenceToken = describeRes.data.logStreams[0].uploadSequenceToken
 
 		const { uri, headers } = getRequestParams(service, region, payload, keys)
 		const request = axios.create({
@@ -161,6 +158,7 @@ const addLogsToStream = async (entry, logGroupName, logStreamName, region, keys 
 
 		const logRestul = await request.post('', payload)
 		console.log(logRestul)
+		nextSequenceToken = logRestul.data.nextSequenceToken
 	} catch (error) {
 		console.error(error)
 	}
