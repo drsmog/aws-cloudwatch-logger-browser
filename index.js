@@ -33,7 +33,8 @@ const getRequestParams = (method, region, payload, keys={}) => {
 		aws4.sign(opts, { accessKeyId: keys.accessKeyId, secretAccessKey: keys.secretAccessKey })
 	else
 		aws4.sign(opts)
-
+	delete opts.headers['Host'];
+	delete opts.headers['Content-Length'];
 	return {
 		uri: `https://${opts.hostname}${opts.path}`,
 		headers: opts.headers
